@@ -14,7 +14,10 @@ from telegram.ext import (
     filters,
     ContextTypes,
 )
-from tracker import update_status, export_approved, get_stats, load_tracker, log_lead
+from tracker import (
+    update_status, export_approved, get_stats, load_tracker, log_lead,
+    get_editing_entry_id, set_editing_entry_id,
+)
 from claude_client import generate_message, parse_outreach_command
 from apollo_client import search_people
 from clay_client import enrich_with_clay
@@ -31,7 +34,6 @@ def is_authorized(update: Update) -> bool:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
         return
-    context.user_data.clear()
     await update.message.reply_text(
         "👋 *Omar Lahlou — Agent Outreach MAIA*\n\n"
         "Parle-moi naturellement :\n"
@@ -53,8 +55,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
     # State: waiting for edited message
-    if context.user_data.get("awaiting_edit"):
-        entry_id = context.user_data.pop("awaiting_edit")
+    entry_id = get_editing_entry_id()
+    if entry_id:
         update_status(entry_id, "approved", final_message=text)
         await update.message.reply_text(f"✅ Message #{entry_id} modifié et approuvé.")
         await _send_next_pending(update, context)
@@ -153,7 +155,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _send_next_pending(update, context)
 
     elif action == "edit":
-        context.user_data["awaiting_edit"] = entry_id
+        set_editing_entry_id(entry_id)
         data = load_tracker()
         entry = next(e for e in data if e["id"] == entry_id)
         await query.edit_message_text(
