@@ -1,0 +1,5 @@
+.env
+__pycache__/
+*.pyc
+tracker.json
+approved_messages.csv
