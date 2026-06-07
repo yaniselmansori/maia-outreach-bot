@@ -4,7 +4,7 @@ import csv
 from datetime import datetime
 from pathlib import Path
 
-_LOCAL_FILE = Path(__file__).parent / "tracker.json"
+_LOCAL_FILE = Path("/tmp/tracker.json")
 _KV_URL = os.environ.get("KV_REST_API_URL")
 _KV_TOKEN = os.environ.get("KV_REST_API_TOKEN")
 _KV_KEY = "outreach_tracker"
