@@ -1,18 +1,17 @@
 import asyncio
+import json
 import os
 import sys
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from flask import Flask, request, Response
 from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters,
 )
 import telegram_bot as bot
-
-app = Flask(__name__)
 
 
 def _build_app():
@@ -26,15 +25,24 @@ def _build_app():
     return application
 
 
-@app.route("/api/webhook", methods=["POST"])
-def webhook():
-    data = request.get_json(force=True)
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        data = json.loads(self.rfile.read(length))
 
-    async def _process():
-        ptb_app = _build_app()
-        async with ptb_app:
-            update = Update.de_json(data, ptb_app.bot)
-            await ptb_app.process_update(update)
+        async def _process():
+            ptb_app = _build_app()
+            async with ptb_app:
+                update = Update.de_json(data, ptb_app.bot)
+                await ptb_app.process_update(update)
 
-    asyncio.run(_process())
-    return Response("ok", status=200)
+        asyncio.run(_process())
+
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ok")
