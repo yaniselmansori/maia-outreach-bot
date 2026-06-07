@@ -86,14 +86,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         await update.message.reply_text(
-            f"✅ *{len(leads)} profils trouvés.* Enrichissement Clay en cours...",
+            f"✅ *{len(leads)} profils trouvés.* Génération des messages en cours...",
             parse_mode="Markdown",
         )
 
-        for lead in leads:
-            lead = enrich_with_clay(lead)
-            message, version = generate_message(lead)
+        loop = asyncio.get_event_loop()
+
+        async def process_one(lead):
+            lead = await loop.run_in_executor(None, enrich_with_clay, lead)
+            message, version = await loop.run_in_executor(None, generate_message, lead)
             log_lead(lead, message, version, status="pending")
+
+        await asyncio.gather(*[process_one(lead) for lead in leads])
 
         await update.message.reply_text(
             f"🎉 *{len(leads)} messages générés !*\n\nTape /pending pour les valider.",
