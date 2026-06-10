@@ -53,6 +53,7 @@ def log_lead(lead: dict, message: str, version: str, status: str = "pending"):
         "sector": lead.get("sector"),
         "title": lead.get("title", ""),
         "linkedin_url": lead.get("linkedin_url", ""),
+        "ai_signal": lead.get("ai_signal", ""),
         "version": version,
         "message": message,
         "status": status,
