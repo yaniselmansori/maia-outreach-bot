@@ -20,6 +20,7 @@ def _build_app():
     application.add_handler(CommandHandler("pending", bot.pending))
     application.add_handler(CommandHandler("stats", bot.stats))
     application.add_handler(CommandHandler("export", bot.export))
+    application.add_handler(CommandHandler("reset", bot.reset))
     application.add_handler(CallbackQueryHandler(bot.button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_text))
     return application

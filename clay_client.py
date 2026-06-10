@@ -19,8 +19,8 @@ Prospect :
 - Prénom : {lead.get('first_name', '')}
 - Titre : {lead.get('title', '')}
 - Entreprise : {lead.get('company', '')}
-- Secteur : {lead.get('sector', '')}
-- Taille : {lead.get('company_size', '')} salariés
+- Secteur : {sector}
+- Taille : {company_size} salariés
 
 Retourne UNIQUEMENT la phrase d'accroche, rien d'autre."""
 

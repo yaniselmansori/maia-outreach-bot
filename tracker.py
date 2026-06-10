@@ -114,6 +114,14 @@ def export_approved():
     return len(approved)
 
 
+def reset_pending() -> int:
+    data = load_tracker()
+    pending = [e for e in data if e["status"] == "pending"]
+    kept = [e for e in data if e["status"] != "pending"]
+    save_tracker(kept)
+    return len(pending)
+
+
 def get_stats() -> dict:
     data = load_tracker()
     return {
