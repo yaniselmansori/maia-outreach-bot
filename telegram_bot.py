@@ -130,11 +130,15 @@ async def pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def _send_validation_card(target, entry: dict):
     version_emoji = "🔵" if entry["version"] == "B" else "⚪"
+    linkedin = entry.get("linkedin_url", "")
+    linkedin_line = f'\n🔗 <a href="{linkedin}">LinkedIn</a>' if linkedin else ""
+    ai_signal = entry.get("ai_signal", "").strip()
+    signal_line = f"\n💡 <i>{e(ai_signal)}</i>" if ai_signal else ""
     text = (
         f"{version_emoji} <b>Version {entry['version']}</b> — Lead #{entry['id']}\n"
         f"👤 <b>{e(entry['first_name'])} {e(entry.get('last_name', ''))}</b>"
         f" — {e(entry['company'])} ({e(entry['sector'])})\n"
-        f"💼 {e(entry.get('title', ''))}\n\n"
+        f"💼 {e(entry.get('title', ''))}{linkedin_line}{signal_line}\n\n"
         f"📝 <b>Message :</b>\n<i>{e(entry['message'])}</i>"
     )
     keyboard = InlineKeyboardMarkup([
