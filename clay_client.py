@@ -11,9 +11,9 @@ _client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 def enrich_with_clay(lead: dict) -> dict:
     prompt = f"""Tu es un expert en prospection B2B PME France/Maroc.
 
-Génère un signal d'accroche court (1 phrase max) pour ce prospect, basé sur son contexte métier.
-Le signal doit justifier naturellement pourquoi on le contacte maintenant — sans mentir, sans inventer.
-Utilise uniquement les données fournies.
+Analyse ce prospect et génère un signal d'accroche UNIQUEMENT si tu peux produire quelque chose de spécifique et crédible — un fait sectoriel précis, une tension opérationnelle réelle propre à ce type d'entreprise, ou un contexte marché actuel vérifiable.
+
+Si tu ne peux produire qu'une phrase générique qui s'appliquerait à n'importe quelle entreprise du secteur, réponds exactement : AUCUN_SIGNAL
 
 Prospect :
 - Prénom : {lead.get('first_name', '')}
@@ -22,7 +22,7 @@ Prospect :
 - Secteur : {lead.get('sector', '')}
 - Taille : {lead.get('company_size', '')} salariés
 
-Retourne UNIQUEMENT la phrase d'accroche, rien d'autre."""
+Retourne UNIQUEMENT la phrase d'accroche ou AUCUN_SIGNAL, rien d'autre."""
 
     response = _client.messages.create(
         model="claude-haiku-4-5-20251001",
@@ -30,5 +30,6 @@ Retourne UNIQUEMENT la phrase d'accroche, rien d'autre."""
         messages=[{"role": "user", "content": prompt}],
     )
 
-    lead["ai_signal"] = response.content[0].text.strip()
+    signal = response.content[0].text.strip()
+    lead["ai_signal"] = "" if signal == "AUCUN_SIGNAL" else signal
     return lead
