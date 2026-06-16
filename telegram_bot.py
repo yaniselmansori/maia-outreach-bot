@@ -177,7 +177,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if action == "call":
         update_status(entry_id, "approved", channel="call")
-        await query.edit_message_text(f"📞 Lead #{entry_id} — appel planifié.")
+        data = load_tracker()
+        entry = next(ent for ent in data if ent["id"] == entry_id)
+        phone = entry.get("phone", "")
+        call_script = entry.get("call_script", "")
+        phone_line = f"\n📞 <b>{e(phone)}</b>" if phone else "\n📞 Numéro non disponible"
+        await query.edit_message_text(
+            f"📞 <b>{e(entry['first_name'])} {e(entry.get('last_name',''))} — {e(entry['company'])}</b>"
+            f"{phone_line}\n\n"
+            f"<i>{e(call_script)}</i>",
+            parse_mode="HTML",
+        )
         await _send_next_pending(update, context)
 
     elif action == "linkedin":
