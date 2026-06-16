@@ -1,5 +1,6 @@
 import os
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -48,14 +49,17 @@ def _is_director(qualite: str) -> bool:
 
 
 def _get_company_detail(siren: str) -> dict:
-    r = requests.get(
-        f"{BASE_URL}/entreprise",
-        params={"api_token": PAPPERS_API_KEY, "siren": siren},
-        timeout=15,
-    )
-    if r.status_code != 200:
+    try:
+        r = requests.get(
+            f"{BASE_URL}/entreprise",
+            params={"api_token": PAPPERS_API_KEY, "siren": siren},
+            timeout=8,
+        )
+        if r.status_code != 200:
+            return {}
+        return r.json()
+    except Exception:
         return {}
-    return r.json()
 
 
 def search_people(criteria: dict, exclude_urls: set = None) -> list[dict]:
@@ -87,62 +91,62 @@ def search_people(criteria: dict, exclude_urls: set = None) -> list[dict]:
             params["code_naf"] = naf
 
         r = requests.get(f"{BASE_URL}/recherche", params=params, timeout=30)
+        if r.status_code == 401:
+            raise Exception("Pappers: clé API invalide ou absente (PAPPERS_API_KEY)")
         if r.status_code != 200:
-            raise Exception(f"Pappers search error {r.status_code}: {r.text}")
+            raise Exception(f"Pappers search error {r.status_code}: {r.text[:200]}")
 
         companies = r.json().get("resultats", [])
         if not companies:
             break
 
-        for company in companies:
-            if len(leads) >= target_count:
-                break
+        # Filter out already-seen companies
+        candidates = [
+            c for c in companies
+            if c.get("siren") and f"pappers:{c['siren']}" not in exclude_urls
+        ][:target_count * 3]
 
-            siren = company.get("siren", "")
-            if not siren:
-                continue
+        # Fetch details in parallel
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            futures = {pool.submit(_get_company_detail, c["siren"]): c for c in candidates}
+            for future in as_completed(futures):
+                if len(leads) >= target_count:
+                    break
+                company = futures[future]
+                detail = future.result()
+                if not detail:
+                    continue
 
-            unique_id = f"pappers:{siren}"
-            if unique_id in exclude_urls:
-                continue
+                representants = detail.get("representants", [])
+                directors = [
+                    rep for rep in representants
+                    if rep.get("prenom") and rep.get("nom")
+                    and _is_director(rep.get("qualite", ""))
+                ]
+                if not directors:
+                    continue
 
-            # Fetch full detail to get dirigeants
-            detail = _get_company_detail(siren)
-            if not detail:
-                continue
+                director = directors[0]
+                siege = detail.get("siege", {})
+                phone = siege.get("telephone") or ""
+                website = detail.get("site_web") or ""
+                effectif = detail.get("effectif") or company.get("effectif") or ""
+                raw_prenom = director.get("prenom", "") or ""
+                first_name = raw_prenom.split(",")[0].strip().title()
 
-            representants = detail.get("representants", [])
-            directors = [
-                rep for rep in representants
-                if rep.get("prenom") and rep.get("nom")
-                and _is_director(rep.get("qualite", ""))
-            ]
-            if not directors:
-                continue
-
-            director = directors[0]
-            siege = detail.get("siege", {})
-            phone = siege.get("telephone") or ""
-            website = detail.get("site_web") or ""
-
-            effectif = detail.get("effectif") or company.get("effectif") or ""
-
-            raw_prenom = director.get("prenom", "") or ""
-            first_name = raw_prenom.split(",")[0].strip().title()
-
-            leads.append({
-                "first_name": first_name,
-                "last_name": director.get("nom", "").strip().title(),
-                "company": detail.get("nom_entreprise", company.get("nom_entreprise", "")),
-                "title": director.get("qualite", ""),
-                "sector": sector,
-                "company_size": str(effectif),
-                "linkedin_url": "",
-                "phone": phone,
-                "website": website,
-                "siren": siren,
-                "city": siege.get("ville", ""),
-            })
+                leads.append({
+                    "first_name": first_name,
+                    "last_name": director.get("nom", "").strip().title(),
+                    "company": detail.get("nom_entreprise", company.get("nom_entreprise", "")),
+                    "title": director.get("qualite", ""),
+                    "sector": sector,
+                    "company_size": str(effectif),
+                    "linkedin_url": "",
+                    "phone": phone,
+                    "website": website,
+                    "siren": company["siren"],
+                    "city": siege.get("ville", ""),
+                })
 
         page += 1
 
