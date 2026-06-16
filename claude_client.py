@@ -1,5 +1,7 @@
 import anthropic
 import os
+import json
+import re
 import logging
 from pathlib import Path
 from dotenv import load_dotenv
@@ -11,43 +13,42 @@ client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 
-def generate_message(lead: dict) -> tuple[str, str]:
+def generate_outreach(lead: dict) -> tuple[str, str]:
     """
-    Generate a personalized outreach message for a lead.
-    Returns (message, version) where version is "A" or "B".
+    Generate LinkedIn message + call script for a lead.
+    Returns (linkedin_message, call_script).
     """
-    has_signal = bool(lead.get("ai_signal", "").strip())
-    version = "B" if has_signal else "A"
-
-    template_file = PROMPTS_DIR / f"version_{'b' if has_signal else 'a'}.txt"
-    template = template_file.read_text()
-
+    template = (PROMPTS_DIR / "outreach.txt").read_text()
     prompt = template.format(
         first_name=lead.get("first_name", ""),
         company=lead.get("company", ""),
         sector=lead.get("sector", ""),
         company_size=lead.get("company_size", ""),
         title=lead.get("title", ""),
-        ai_signal=lead.get("ai_signal", ""),
     )
 
     response = client.messages.create(
-        model="claude-opus-4-8",
-        max_tokens=300,
+        model="claude-haiku-4-5-20251001",
+        max_tokens=400,
         messages=[{"role": "user", "content": prompt}],
     )
 
-    return response.content[0].text.strip(), version
+    raw = response.content[0].text.strip()
+    match = re.search(r'\{.*\}', raw, re.DOTALL)
+    if match:
+        try:
+            data = json.loads(match.group())
+            return data.get("linkedin", ""), data.get("call_script", "")
+        except json.JSONDecodeError:
+            logging.warning(f"JSON invalide: {match.group()}")
+
+    return raw, ""
 
 
 def parse_outreach_command(text: str) -> dict:
     """
     Parse a natural language outreach command into Apollo search criteria.
-    Uses Haiku for speed and cost efficiency.
     """
-    import json
-    import re
-
     prompt = f"""Extrait les critères de recherche depuis cette commande.
 
 Commande : "{text}"
@@ -64,18 +65,12 @@ Adapte les valeurs à la commande. Titres selon le rôle :
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=400,
-        messages=[
-            {
-                "role": "user",
-                "content": prompt,
-            }
-        ],
+        messages=[{"role": "user", "content": prompt}],
     )
 
     raw = response.content[0].text.strip()
     logging.info(f"Claude Haiku raw response: {repr(raw)}")
 
-    # Extract JSON block even if Claude adds surrounding text
     match = re.search(r'\{.*\}', raw, re.DOTALL)
     if match:
         try:
@@ -83,21 +78,16 @@ Adapte les valeurs à la commande. Titres selon le rôle :
         except json.JSONDecodeError:
             logging.warning(f"JSON invalide dans: {match.group()}")
 
-    # Fallback: extract keywords manually from the original text
     logging.warning("Fallback: parsing manuel de la commande")
     return _fallback_parse(text)
 
 
 def _fallback_parse(text: str) -> dict:
-    """Manual keyword extraction when Claude JSON fails."""
     text_lower = text.lower()
 
-    # Detect count
-    import re
     count_match = re.search(r'\b(\d+)\b', text)
     count = int(count_match.group(1)) if count_match else 10
 
-    # Detect sector
     sector_map = {
         "construction": "construction",
         "logistique": "logistique",
@@ -110,7 +100,6 @@ def _fallback_parse(text: str) -> dict:
     }
     sector = next((v for k, v in sector_map.items() if k in text_lower), "")
 
-    # Detect titles
     if any(w in text_lower for w in ["ceo", "dg", "directeur général", "gérant", "patron", "pdg"]):
         titles = ["CEO", "Directeur Général", "DG", "Gérant", "PDG"]
     elif any(w in text_lower for w in ["daf", "cfo", "financier"]):

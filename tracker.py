@@ -42,7 +42,7 @@ def save_tracker(data: list):
         _LOCAL_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
 
 
-def log_lead(lead: dict, message: str, version: str, status: str = "pending"):
+def log_lead(lead: dict, linkedin_msg: str, call_script: str, status: str = "pending"):
     data = load_tracker()
     entry = {
         "id": len(data) + 1,
@@ -53,9 +53,10 @@ def log_lead(lead: dict, message: str, version: str, status: str = "pending"):
         "sector": lead.get("sector"),
         "title": lead.get("title", ""),
         "linkedin_url": lead.get("linkedin_url", ""),
-        "ai_signal": lead.get("ai_signal", ""),
-        "version": version,
-        "message": message,
+        "phone": lead.get("phone", ""),
+        "linkedin_msg": linkedin_msg,
+        "call_script": call_script,
+        "channel": None,
         "status": status,
     }
     data.append(entry)
@@ -63,13 +64,15 @@ def log_lead(lead: dict, message: str, version: str, status: str = "pending"):
     return entry
 
 
-def update_status(entry_id: int, status: str, final_message: str = None):
+def update_status(entry_id: int, status: str, channel: str = None, final_message: str = None):
     data = load_tracker()
     for entry in data:
         if entry["id"] == entry_id:
             entry["status"] = status
+            if channel:
+                entry["channel"] = channel
             if final_message:
-                entry["message"] = final_message
+                entry["linkedin_msg"] = final_message
             entry["updated_at"] = datetime.now().isoformat()
     save_tracker(data)
 
@@ -101,16 +104,18 @@ def export_approved():
     with open(export_file, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(
             f,
-            fieldnames=["first_name", "company", "linkedin_url", "version", "message"],
+            fieldnames=["first_name", "company", "channel", "linkedin_url", "phone", "linkedin_msg", "call_script"],
         )
         writer.writeheader()
         for entry in approved:
             writer.writerow({
                 "first_name": entry["first_name"],
                 "company": entry["company"],
-                "linkedin_url": entry["linkedin_url"],
-                "version": entry["version"],
-                "message": entry["message"],
+                "channel": entry.get("channel", ""),
+                "linkedin_url": entry.get("linkedin_url", ""),
+                "phone": entry.get("phone", ""),
+                "linkedin_msg": entry.get("linkedin_msg", ""),
+                "call_script": entry.get("call_script", ""),
             })
     return len(approved)
 

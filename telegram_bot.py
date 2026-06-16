@@ -1,3 +1,7 @@
+"""
+MAIA Outreach Bot
+Flow: commande naturelle → Apollo → Claude (LinkedIn + script appel) → validation Telegram
+"""
 import asyncio
 import html
 import os
@@ -20,15 +24,14 @@ from tracker import (
     update_status, export_approved, get_stats, load_tracker, log_lead,
     get_editing_entry_id, set_editing_entry_id, reset_pending,
 )
-from claude_client import generate_message, parse_outreach_command
+from claude_client import generate_outreach, parse_outreach_command
 from apollo_client import search_people
-from clay_client import enrich_with_clay
 
 logging.basicConfig(level=logging.INFO)
 
 YOUR_TELEGRAM_ID = int(os.environ["TELEGRAM_USER_ID"])
 
-e = html.escape  # shorthand for escaping user content in HTML messages
+e = html.escape
 
 
 def is_authorized(update: Update) -> bool:
@@ -39,15 +42,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
         return
     await update.message.reply_text(
-        "👋 <b>Omar Lahlou — Agent Outreach MAIA</b>\n\n"
+        "👋 <b>MAIA — Agent Outreach</b>\n\n"
         "Parle-moi naturellement :\n"
         '› <i>"Trouve 5 CEO de PME dans la construction"</i>\n'
         '› <i>"10 DG logistique à Lyon"</i>\n'
         '› <i>"3 DAF dans le retail"</i>\n\n'
         "Commandes :\n"
-        "/pending — valider les messages\n"
+        "/pending — valider les leads\n"
         "/stats — tableau de bord\n"
-        "/export — afficher les messages approuvés à envoyer\n"
+        "/export — exporter les approuvés\n"
         "/reset — vider la file en attente",
         parse_mode="HTML",
     )
@@ -59,16 +62,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text.strip()
 
-    # State: waiting for edited message
+    # State: waiting for edited LinkedIn message
     entry_id = get_editing_entry_id()
     if entry_id:
-        update_status(entry_id, "approved", final_message=text)
-        await update.message.reply_text(f"✅ Message #{entry_id} modifié et approuvé.")
+        update_status(entry_id, "approved", channel="linkedin", final_message=text)
+        await update.message.reply_text(f"✅ Message #{entry_id} modifié et approuvé (LinkedIn).")
         await _send_next_pending(update, context)
         return
 
-    # Default: natural language outreach command
-    await update.message.reply_text("⏳ Je cherche les profils sur Apollo...")
+    await update.message.reply_text("⏳ Recherche Apollo en cours...")
 
     try:
         criteria = parse_outreach_command(text)
@@ -80,32 +82,33 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Taille : {criteria.get('company_size_min')}–{criteria.get('company_size_max')} sal.\n"
             f"Géo : {e(criteria.get('location', 'France'))}\n"
             f"Nombre : {criteria.get('count', 10)}\n\n"
-            "🔍 Recherche Apollo en cours...",
+            "🔍 Recherche en cours...",
             parse_mode="HTML",
         )
 
-        leads = search_people(criteria)
+        existing = load_tracker()
+        seen_urls = {e.get("linkedin_url", "") for e in existing if e.get("linkedin_url")}
+        leads = search_people(criteria, exclude_urls=seen_urls)
 
         if not leads:
             await update.message.reply_text("❌ Aucun profil trouvé. Essaie d'élargir les critères.")
             return
 
         await update.message.reply_text(
-            f"✅ <b>{len(leads)} profils trouvés.</b> Génération des messages en cours...",
+            f"✅ <b>{len(leads)} profils trouvés.</b> Génération des messages...",
             parse_mode="HTML",
         )
 
         loop = asyncio.get_running_loop()
 
         async def process_one(lead):
-            lead = await loop.run_in_executor(None, enrich_with_clay, lead)
-            message, version = await loop.run_in_executor(None, generate_message, lead)
-            log_lead(lead, message, version, status="pending")
+            linkedin_msg, call_script = await loop.run_in_executor(None, generate_outreach, lead)
+            log_lead(lead, linkedin_msg, call_script, status="pending")
 
         await asyncio.gather(*[process_one(lead) for lead in leads])
 
         await update.message.reply_text(
-            f"🎉 <b>{len(leads)} messages générés !</b>\n\nTape /pending pour les valider.",
+            f"🎉 <b>{len(leads)} leads prêts !</b>\n\nTape /pending pour les valider.",
             parse_mode="HTML",
         )
 
@@ -120,35 +123,47 @@ async def pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = load_tracker()
     queue = [entry for entry in data if entry["status"] == "pending"]
     if not queue:
-        await update.message.reply_text("✅ Aucun message en attente.")
+        await update.message.reply_text("✅ Aucun lead en attente.")
         return
     await update.message.reply_text(
-        f"📋 <b>{len(queue)} message(s) en attente</b>", parse_mode="HTML"
+        f"📋 <b>{len(queue)} lead(s) en attente</b>", parse_mode="HTML"
     )
     await _send_validation_card(update.message, queue[0])
 
 
 async def _send_validation_card(target, entry: dict):
-    version_emoji = "🔵" if entry["version"] == "B" else "⚪"
     linkedin = entry.get("linkedin_url", "")
-    linkedin_line = f'\n🔗 <a href="{linkedin}">LinkedIn</a>' if linkedin else ""
-    ai_signal = entry.get("ai_signal", "").strip()
-    signal_line = f"\n💡 <i>{e(ai_signal)}</i>" if ai_signal else ""
+    phone = entry.get("phone", "")
+    linkedin_line = f'\n🔗 <a href="{linkedin}">LinkedIn</a>' if linkedin else "\n🔗 LinkedIn non disponible"
+    phone_line = f"\n📞 {e(phone)}" if phone else "\n📞 Numéro non disponible"
+
+    linkedin_msg = entry.get("linkedin_msg") or entry.get("message", "")
+    call_script = entry.get("call_script", "")
+
+    call_block = f"\n\n📞 <b>Script appel :</b>\n<i>{e(call_script)}</i>" if call_script else ""
+
     text = (
-        f"{version_emoji} <b>Version {entry['version']}</b> — Lead #{entry['id']}\n"
+        f"<b>Lead #{entry['id']}</b>\n"
         f"👤 <b>{e(entry['first_name'])} {e(entry.get('last_name', ''))}</b>"
         f" — {e(entry['company'])} ({e(entry['sector'])})\n"
-        f"💼 {e(entry.get('title', ''))}{linkedin_line}{signal_line}\n\n"
-        f"📝 <b>Message :</b>\n<i>{e(entry['message'])}</i>"
+        f"💼 {e(entry.get('title', ''))}"
+        f"{linkedin_line}"
+        f"{phone_line}\n\n"
+        f"💬 <b>LinkedIn :</b>\n<i>{e(linkedin_msg)}</i>"
+        f"{call_block}"
     )
+
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ Approuver", callback_data=f"approve:{entry['id']}"),
-            InlineKeyboardButton("❌ Rejeter", callback_data=f"reject:{entry['id']}"),
+            InlineKeyboardButton("📞 Appeler", callback_data=f"call:{entry['id']}"),
+            InlineKeyboardButton("💼 LinkedIn", callback_data=f"linkedin:{entry['id']}"),
         ],
-        [InlineKeyboardButton("✏️ Modifier", callback_data=f"edit:{entry['id']}")],
+        [
+            InlineKeyboardButton("✏️ Modifier message", callback_data=f"edit:{entry['id']}"),
+            InlineKeyboardButton("❌ Passer", callback_data=f"reject:{entry['id']}"),
+        ],
     ])
-    await target.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
+    await target.reply_text(text, parse_mode="HTML", reply_markup=keyboard, disable_web_page_preview=True)
 
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -160,14 +175,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action, entry_id = query.data.split(":")
     entry_id = int(entry_id)
 
-    if action == "approve":
-        update_status(entry_id, "approved")
-        await query.edit_message_text(f"✅ Message #{entry_id} approuvé.")
+    if action == "call":
+        update_status(entry_id, "approved", channel="call")
+        await query.edit_message_text(f"📞 Lead #{entry_id} — appel planifié.")
+        await _send_next_pending(update, context)
+
+    elif action == "linkedin":
+        update_status(entry_id, "approved", channel="linkedin")
+        await query.edit_message_text(f"💼 Lead #{entry_id} — LinkedIn approuvé.")
         await _send_next_pending(update, context)
 
     elif action == "reject":
         update_status(entry_id, "rejected")
-        await query.edit_message_text(f"❌ Message #{entry_id} rejeté.")
+        await query.edit_message_text(f"❌ Lead #{entry_id} passé.")
         await _send_next_pending(update, context)
 
     elif action == "edit":
@@ -175,8 +195,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data = load_tracker()
         entry = next(ent for ent in data if ent["id"] == entry_id)
         await query.edit_message_text(
-            f"✏️ <b>Modifier le message #{entry_id}</b>\n\n"
-            f"Message actuel :\n<i>{e(entry['message'])}</i>\n\n"
+            f"✏️ <b>Modifier le message LinkedIn #{entry_id}</b>\n\n"
+            f"Message actuel :\n<i>{e(entry.get('linkedin_msg', ''))}</i>\n\n"
             "Envoie le nouveau message :",
             parse_mode="HTML",
         )
@@ -189,20 +209,23 @@ async def _send_next_pending(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if queue:
         await _send_validation_card(target, queue[0])
     else:
-        await target.reply_text("🎉 Tous validés ! Tape /export pour afficher les messages à envoyer.")
+        await target.reply_text("🎉 Tous traités ! Tape /export pour exporter.")
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
         return
     s = get_stats()
+    data = load_tracker()
+    calls = sum(1 for e in data if e.get("channel") == "call" and e["status"] == "approved")
+    linkedins = sum(1 for e in data if e.get("channel") == "linkedin" and e["status"] == "approved")
     await update.message.reply_text(
         f"📊 <b>Stats Outreach MAIA</b>\n\n"
         f"Total : {s['total']}\n"
         f"⏳ En attente : {s['pending']}\n"
-        f"✅ Approuvés : {s['approved']}\n"
-        f"❌ Rejetés : {s['rejected']}\n"
-        f"📤 Envoyés : {s['sent']}",
+        f"✅ Approuvés : {s['approved']} (📞 {calls} appels / 💼 {linkedins} LinkedIn)\n"
+        f"❌ Passés : {s['rejected']}\n"
+        f"📤 Traités : {s['sent']}",
         parse_mode="HTML",
     )
 
@@ -213,27 +236,40 @@ async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = load_tracker()
     approved = [entry for entry in data if entry["status"] == "approved"]
     if not approved:
-        await update.message.reply_text("Aucun message approuvé.")
+        await update.message.reply_text("Aucun lead approuvé.")
         return
-    await update.message.reply_text(
-        f"📤 <b>{len(approved)} message(s) à envoyer :</b>", parse_mode="HTML"
-    )
-    for entry in approved:
-        text = (
-            f"👤 <b>{e(entry['first_name'])} {e(entry.get('last_name', ''))}</b>"
-            f" — {e(entry['company'])}\n"
-            f"🔗 {entry.get('linkedin_url', 'LinkedIn non disponible')}\n\n"
-            f"{e(entry['message'])}"
-        )
-        await update.message.reply_text(text, parse_mode="HTML")
-        update_status(entry["id"], "sent")
+
+    calls = [e for e in approved if e.get("channel") == "call"]
+    linkedins = [e for e in approved if e.get("channel") == "linkedin"]
+
+    if calls:
+        await update.message.reply_text(f"📞 <b>{len(calls)} appel(s) à passer :</b>", parse_mode="HTML")
+        for entry in calls:
+            text = (
+                f"👤 <b>{e(entry['first_name'])} {e(entry.get('last_name', ''))}</b> — {e(entry['company'])}\n"
+                f"📞 {e(entry.get('phone', 'Non disponible'))}\n\n"
+                f"<i>{e(entry.get('call_script', ''))}</i>"
+            )
+            await update.message.reply_text(text, parse_mode="HTML")
+            update_status(entry["id"], "sent")
+
+    if linkedins:
+        await update.message.reply_text(f"💼 <b>{len(linkedins)} message(s) LinkedIn :</b>", parse_mode="HTML")
+        for entry in linkedins:
+            text = (
+                f"👤 <b>{e(entry['first_name'])} {e(entry.get('last_name', ''))}</b> — {e(entry['company'])}\n"
+                f"🔗 {entry.get('linkedin_url', 'Non disponible')}\n\n"
+                f"{e(entry.get('linkedin_msg', ''))}"
+            )
+            await update.message.reply_text(text, parse_mode="HTML")
+            update_status(entry["id"], "sent")
 
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update):
         return
     count = reset_pending()
-    await update.message.reply_text(f"🗑️ {count} message(s) en attente supprimés.")
+    await update.message.reply_text(f"🗑️ {count} lead(s) en attente supprimés.")
 
 
 def run():

@@ -1,19 +1,14 @@
 """
 MAIA Outreach Agent
-Flow: Apollo CSV → Clay enrichment → Claude message → Telegram validation → Waalaxy export
+Flow: Apollo CSV → Claude (LinkedIn + script appel) → Telegram validation
 """
 import csv
 import sys
-from claude_client import generate_message
+from claude_client import generate_outreach
 from tracker import log_lead
-from clay_client import enrich_with_clay
 
 
 def process_leads_from_csv(filepath: str):
-    """
-    Read leads from Apollo CSV export, enrich via Clay, generate messages.
-    Logs all to tracker with status=pending for Telegram validation.
-    """
     with open(filepath, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         leads = list(reader)
@@ -29,23 +24,17 @@ def process_leads_from_csv(filepath: str):
             "sector": raw_lead.get("Industry", raw_lead.get("sector", "")),
             "company_size": raw_lead.get("# Employees", raw_lead.get("company_size", "")),
             "linkedin_url": raw_lead.get("LinkedIn Url", raw_lead.get("linkedin_url", "")),
-            "ai_signal": "",
+            "phone": raw_lead.get("Phone", raw_lead.get("phone", "")),
         }
 
-        print(f"[{i}/{len(leads)}] Traitement : {lead['first_name']} {lead['last_name']} — {lead['company']}")
+        print(f"[{i}/{len(leads)}] {lead['first_name']} {lead['last_name']} — {lead['company']}")
 
-        # Enrich with Clay
-        lead = enrich_with_clay(lead)
+        linkedin_msg, call_script = generate_outreach(lead)
+        log_lead(lead, linkedin_msg, call_script, status="pending")
 
-        # Generate message with Claude
-        message, version = generate_message(lead)
+        print(f"  → Messages générés")
 
-        # Log to tracker (status=pending → waits for Telegram validation)
-        log_lead(lead, message, version, status="pending")
-
-        print(f"  → Version {version} générée ({'signal IA détecté' if version == 'B' else 'profil froid'})")
-
-    print(f"\n✅ {len(leads)} messages générés et en attente de validation sur Telegram.")
+    print(f"\n✅ {len(leads)} leads en attente de validation sur Telegram.")
     print("Lance le bot Telegram pour valider : python telegram_bot.py")
 
 
