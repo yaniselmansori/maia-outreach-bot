@@ -139,9 +139,15 @@ async def pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _send_validation_card(target, entry: dict):
     linkedin = entry.get("linkedin_url", "")
     phone = entry.get("phone", "")
+    website = entry.get("website", "")
     city = entry.get("city", "")
     linkedin_line = f'\n🔗 <a href="{linkedin}">LinkedIn</a>' if linkedin else ""
-    phone_line = f"\n📞 {e(phone)}" if phone else "\n📞 Numéro non disponible"
+    if phone:
+        phone_line = f"\n📞 {e(phone)}"
+    elif website:
+        phone_line = f"\n🌐 <a href=\"{website}\">{e(website)}</a> (chercher le numéro)"
+    else:
+        phone_line = "\n📞 Numéro non dispo — chercher sur Google"
     city_line = f" · {e(city)}" if city else ""
 
     linkedin_msg = entry.get("linkedin_msg") or entry.get("message", "")
