@@ -49,7 +49,7 @@ def search_people(criteria: dict, exclude_urls: set = None) -> list[dict]:
         }
 
         response = requests.post(
-            "https://api.apollo.io/api/v1/mixed_people/search",
+            "https://api.apollo.io/api/v1/mixed_people/api_search",
             json=payload,
             headers={
                 "Content-Type": "application/json",
