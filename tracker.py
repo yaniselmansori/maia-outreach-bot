@@ -54,6 +54,8 @@ def log_lead(lead: dict, linkedin_msg: str, call_script: str, status: str = "pen
         "title": lead.get("title", ""),
         "linkedin_url": lead.get("linkedin_url", ""),
         "phone": lead.get("phone", ""),
+        "siren": lead.get("siren", ""),
+        "city": lead.get("city", ""),
         "linkedin_msg": linkedin_msg,
         "call_script": call_script,
         "channel": None,

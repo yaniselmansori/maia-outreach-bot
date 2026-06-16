@@ -25,7 +25,7 @@ from tracker import (
     get_editing_entry_id, set_editing_entry_id, reset_pending,
 )
 from claude_client import generate_outreach, parse_outreach_command
-from apollo_client import search_people
+from pappers_client import search_people
 
 logging.basicConfig(level=logging.INFO)
 
@@ -87,8 +87,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         existing = load_tracker()
-        seen_urls = {e.get("linkedin_url", "") for e in existing if e.get("linkedin_url")}
-        leads = search_people(criteria, exclude_urls=seen_urls)
+        seen_ids = set()
+        for ent in existing:
+            if ent.get("siren"):
+                seen_ids.add(f"pappers:{ent['siren']}")
+            elif ent.get("linkedin_url"):
+                seen_ids.add(ent["linkedin_url"])
+        leads = search_people(criteria, exclude_urls=seen_ids)
 
         if not leads:
             await update.message.reply_text("❌ Aucun profil trouvé. Essaie d'élargir les critères.")
@@ -134,8 +139,10 @@ async def pending(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _send_validation_card(target, entry: dict):
     linkedin = entry.get("linkedin_url", "")
     phone = entry.get("phone", "")
-    linkedin_line = f'\n🔗 <a href="{linkedin}">LinkedIn</a>' if linkedin else "\n🔗 LinkedIn non disponible"
+    city = entry.get("city", "")
+    linkedin_line = f'\n🔗 <a href="{linkedin}">LinkedIn</a>' if linkedin else ""
     phone_line = f"\n📞 {e(phone)}" if phone else "\n📞 Numéro non disponible"
+    city_line = f" · {e(city)}" if city else ""
 
     linkedin_msg = entry.get("linkedin_msg") or entry.get("message", "")
     call_script = entry.get("call_script", "")
@@ -145,7 +152,7 @@ async def _send_validation_card(target, entry: dict):
     text = (
         f"<b>Lead #{entry['id']}</b>\n"
         f"👤 <b>{e(entry['first_name'])} {e(entry.get('last_name', ''))}</b>"
-        f" — {e(entry['company'])} ({e(entry['sector'])})\n"
+        f" — {e(entry['company'])}{city_line}\n"
         f"💼 {e(entry.get('title', ''))}"
         f"{linkedin_line}"
         f"{phone_line}\n\n"
